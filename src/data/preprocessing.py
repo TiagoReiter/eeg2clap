@@ -16,9 +16,9 @@ This ensures that text embeddings can be directly aligned with EEG samples.
 Typical usage:
     python preprocessing.py \
         --input_dir data/raw/Brennan \
-        --output_dir data/interim \
+        --output_dir data/preprocessed \
         --word_csv AliceChapterOne-EEG.csv \
-        --sfreq 125 \
+        --sfreq 250 \
         --tmin -0.2 --tmax 0.8 \
         --min_word_length 0.1
 
@@ -47,24 +47,17 @@ import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-# -------------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # Core EEG preprocessing
-# -------------------------------------------------------------------------
+# -----------------------------------------------------------------------
 
 def load_raw(path: Path, montage: str | None = "standard_1020") -> mne.io.BaseRaw:
     """Read EEG file in BrainVision format via MNE."""
-    # Look for .vhdr file (BrainVision header)
-    if path.suffix.lower() == '.vhdr':
-        raw_path = path
-    else:
-        # Try to find corresponding .vhdr file
-        vhdr_path = path.with_suffix('.vhdr')
-        if vhdr_path.exists():
-            raw_path = vhdr_path
-        else:
-            raise FileNotFoundError(f"Could not find .vhdr file for {path}")
+    # Expect Sxx.vhdr format (xx = 01-49)
+    if not path.name.startswith('S') or not path.suffix.lower() == '.vhdr':
+        raise ValueError(f"Expected Sxx.vhdr format, got {path.name}")
     
-    raw = mne.io.read_raw_brainvision(raw_path, preload=True, verbose="ERROR")
+    raw = mne.io.read_raw_brainvision(path, preload=True, verbose="ERROR")
     if montage is not None:
         raw.set_montage(montage, on_missing="ignore")
     return raw
@@ -431,12 +424,12 @@ def main():
     p.add_argument('--output_dir', type=Path, required=True)
     p.add_argument('--word_csv', type=str, default='AliceChapterOne-EEG.csv',
                    help='CSV file with word timing annotations')
-    p.add_argument('--sfreq', type=int, default=125, help='Target sampling rate (Hz) - default 125 Hz')
+    p.add_argument('--sfreq', type=int, default=250, help='Target sampling rate (Hz) - default 250 Hz')
     p.add_argument('--band', nargs=2, type=float, default=(0.1, 40), 
                    metavar=('LOW', 'HIGH'), help='Band-pass cut-offs in Hz')
     p.add_argument('--notch', nargs='*', type=int, default=[50, 100], 
                    help='Notch filter frequencies')
-    p.add_argument('--ica', action='store_true', help='Run ICA artifact removal')
+    p.add_argument('--ica', default=True, action='store_true', help='Run ICA artifact removal')
     p.add_argument('--tmin', type=float, default=-0.2, 
                    help='Epoch start time relative to word onset (s)')
     p.add_argument('--tmax', type=float, default=0.8, 
