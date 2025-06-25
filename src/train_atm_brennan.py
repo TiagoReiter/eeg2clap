@@ -72,6 +72,7 @@ def main(argv: List[str] | None = None):
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--patch_len", type=int, default=None, help="Force patch length (must divide T)")
+    p.add_argument("--use_split", action="store_true", help="Use _train/_val/_test split files")
     # WandB
     p.add_argument("--wandb_project", default="EEG-Brennan-ATM")
     p.add_argument("--wandb_entity", default=None)
@@ -83,15 +84,30 @@ def main(argv: List[str] | None = None):
     # ------------------------------------------------------------------
     # Dataset & DataLoader
     # ------------------------------------------------------------------
-    ds = BrennanAliceDataset(
+    suffix = "_train.npz" if args.use_split else "_words.npz"
+    val_suffix = "_val.npz" if args.use_split else "_words.npz"
+
+    train_ds = BrennanAliceDataset(
         npz_dir=str(args.npz_dir),
         audio_dir=str(args.audio_dir),
         subjects=args.subjects,
         device=device,
+        npz_suffix=suffix,
     )
 
+    if args.use_split:
+        val_ds = BrennanAliceDataset(
+            npz_dir=str(args.npz_dir),
+            audio_dir=str(args.audio_dir),
+            subjects=args.subjects,
+            device=device,
+            npz_suffix=val_suffix,
+        )
+    else:
+        val_ds = None
+
     # Infer C, T
-    C, T = ds.eeg_data.shape[1:]
+    C, T = train_ds.eeg_data.shape[1:]
     print(f"Detected EEG shape per sample: channels={C}, timepoints={T}")
 
     # Choose/validate patch_len
@@ -99,7 +115,11 @@ def main(argv: List[str] | None = None):
     print(f"Using patch_len={patch_len} (T/patch_len = {T//patch_len} patches)")
 
     # DataLoader
-    loader = DataLoader(ds, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=0)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=0)
+    if val_ds is not None:
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
+    else:
+        val_loader = None
 
     # ------------------------------------------------------------------
     # Model, optimiser, loss
@@ -140,7 +160,7 @@ def main(argv: List[str] | None = None):
     for epoch in range(1, args.epochs + 1):
         model.train()
         running_loss = 0.0
-        for batch in loader:
+        for batch in train_loader:
             eeg = batch["eeg"].to(device).float()        # B × C × T
             txt = batch["text_features"].to(device).float()   # B × D
             aud = batch["audio_features"].to(device).float()  # B × D
@@ -161,9 +181,27 @@ def main(argv: List[str] | None = None):
 
             running_loss += loss.item()
 
-        avg_loss = running_loss / len(loader)
+        avg_loss = running_loss / len(train_loader)
         print(f"Epoch {epoch}/{args.epochs}  loss={avg_loss:.4f}")
-        logger.log({"loss": avg_loss, "epoch": epoch})
+
+        log_dict = {"train_loss": avg_loss, "epoch": epoch}
+
+        if val_loader is not None:
+            model.eval()
+            val_loss_acc = 0.0
+            with torch.no_grad():
+                for vb in val_loader:
+                    eeg = vb["eeg"].to(device).float()
+                    txt = vb["text_features"].to(device).float()
+                    aud = vb["audio_features"].to(device).float()
+                    eeg_emb = model(eeg)
+                    loss_val = loss_fn([F.normalize(eeg_emb,dim=-1), F.normalize(txt,dim=-1), F.normalize(aud,dim=-1)], model.logit_scale)
+                    val_loss_acc += loss_val.item()
+            val_loss_acc /= len(val_loader)
+            print(f"  validation loss={val_loss_acc:.4f}")
+            log_dict["val_loss"] = val_loss_acc
+
+        logger.log(log_dict)
 
     logger.finish()
 

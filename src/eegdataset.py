@@ -23,7 +23,8 @@ class BrennanAliceDataset(Dataset):
         subjects: list[str],
         clip_model_name: str = 'ViT-B-32',
         clip_pretrained: str = 'laion2b_s32b_b79k',
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        npz_suffix: str = "_words.npz"
     ):
         """
         Args:
@@ -34,11 +35,13 @@ class BrennanAliceDataset(Dataset):
             clip_model_name (str): The CLIP model architecture to use.
             clip_pretrained (str): The pretrained CLIP weights to use.
             device (str): The device to run model inference on ('cpu' or 'cuda').
+            npz_suffix (str): The suffix to append to subject identifiers for npz files.
         """
         self.npz_dir = Path(npz_dir)
         self.audio_dir = Path(audio_dir)
         self.subjects = subjects
         self.device = device
+        self.suffix = npz_suffix
 
         # 1. Load and concatenate data from all subjects
         self.eeg_data, self.metadata = self._load_all_subject_data()
@@ -66,7 +69,7 @@ class BrennanAliceDataset(Dataset):
 
         print(f"Loading data for subjects: {self.subjects}")
         for subj in tqdm(self.subjects):
-            npz_path = self.npz_dir / f"{subj}_words.npz"
+            npz_path = self.npz_dir / f"{subj}{self.suffix}"
             if not npz_path.exists():
                 print(f"Warning: File not found for subject {subj}, skipping.")
                 continue
