@@ -3,20 +3,25 @@
 
 The script loads word-level EEG epochs, CLIP text embeddings, and Wav2Vec2 audio
 embeddings via `BrennanAliceDataset`, feeds the EEG into an ATM encoder, and
-optimises a contrastive objective against both modalities.
+optimises a three-view InfoNCE objective (EEG ↔ text ↔ audio).
 
 Important implementation details
 --------------------------------
 1.  **Input shape sanity-check** – we automatically infer `(C, T)` from the
     dataset and make sure the chosen `patch_len` divides *T* (else we exit with
     a helpful error message).
-2.  **Loss** – symmetric InfoNCE on (EEG × Text) and (EEG × Audio) pairs.
-3.  **Logging** – scalar metrics go to Weights & Biases via `WandbLogger`.
+2.  **Dataset splits** – with `--use_split` the script reads *_train.npz* and
+    *_val.npz* files created by `utils/split_brennan_npz.py`; otherwise it
+    uses the full *_words.npz*.
+3.  **Loss** – `MultiViewInfoNCELoss` averages CLIP-style InfoNCE over the
+    three modality pairs (EEG–Text, EEG–Audio, Text–Audio).
+4.  **Validation** – optional per-epoch validation pass logged as `val_loss`.
+5.  **Logging** – metrics are sent to Weights & Biases via `WandbLogger`.
 
 Run:
     python train_atm_brennan.py \
-        --npz_dir "D:/…/Brennan_npz" \
-        --audio_dir "D:/…/Brennan/audio" \
+        --npz_dir "D:/Universität/Master/Masterarbeit/python/data/preprocessed/Brennan" \
+        --audio_dir "D:/Universität/Master/Masterarbeit/python/data/audio" \
         --subjects S01 S03 S04 \
         --epochs 10 --batch_size 128
 """
@@ -37,6 +42,14 @@ from util import WandbLogger
 from eegdataset import BrennanAliceDataset
 from models.atm import ATM
 from losses.multiview_infonce import MultiViewInfoNCELoss
+
+# -----------------------------------------------------------------------------
+# WandB credentials – set once at import time so any subsequent WandbLogger
+# initialisation picks them up.
+# -----------------------------------------------------------------------------
+import os
+os.environ["WANDB_API_KEY"] = "fc2d1bc24195ed0dc256cf0d1a94a44630eff1e7"
+os.environ["WANDB_MODE"] = "online"
 
 # -----------------------------------------------------------------------------
 # Helper – build ATM with a patch length that divides T
@@ -64,19 +77,19 @@ def choose_patch_len(T: int, candidate: int | None = None) -> int:
 def main(argv: List[str] | None = None):
     p = argparse.ArgumentParser(description="Train ATM on Brennan EEG data")
     # Data
-    p.add_argument("--npz_dir", required=True, type=Path)
-    p.add_argument("--audio_dir", required=True, type=Path)
-    p.add_argument("--subjects", nargs="+", required=True, help="Subject IDs like S01 S03 …")
+    p.add_argument("--npz_dir", type=Path, default="D:/Universität/Master/Masterarbeit/python/data/preprocessed/Brennan")
+    p.add_argument("--audio_dir", type=Path, default="D:/Universität/Master/Masterarbeit/python/data/audio")
+    p.add_argument("--subjects", nargs="+", default=["S01", "S03", "S04"], help="Subject IDs like S01 S03 …")
     # Training
     p.add_argument("--epochs", type=int, default=20)
-    p.add_argument("--batch_size", type=int, default=128)
+    p.add_argument("--batch_size", type=int, default=64)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--patch_len", type=int, default=None, help="Force patch length (must divide T)")
-    p.add_argument("--use_split", action="store_true", help="Use _train/_val/_test split files")
+    p.add_argument("--use_split", default=True, action="store_true", help="Use _train/_val/_test split files")
     # WandB
-    p.add_argument("--wandb_project", default="EEG-Brennan-ATM")
-    p.add_argument("--wandb_entity", default=None)
-    p.add_argument("--wandb_name", default="run")
+    p.add_argument("--wandb_project", default="Masterthesis")
+    p.add_argument("--wandb_entity", default="t-reiter-technical-university-of-munich")
+    p.add_argument("--wandb_name", default="ATM_run")
     args = p.parse_args(argv)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -87,6 +100,10 @@ def main(argv: List[str] | None = None):
     suffix = "_train.npz" if args.use_split else "_words.npz"
     val_suffix = "_val.npz" if args.use_split else "_words.npz"
 
+    print(f"Loading data from: {args.npz_dir}")
+    print(f"Using subjects: {args.subjects}")
+    print(f"Loading audio from: {args.audio_dir}")
+    
     train_ds = BrennanAliceDataset(
         npz_dir=str(args.npz_dir),
         audio_dir=str(args.audio_dir),
@@ -139,19 +156,10 @@ def main(argv: List[str] | None = None):
     # ------------------------------------------------------------------
     # WandB logger
     # ------------------------------------------------------------------
-    logger = WandbLogger(
-        {
-            "project": args.wandb_project,
-            "entity": args.wandb_entity,
-            "name": args.wandb_name,
-            "epochs": args.epochs,
-            "batch_size": args.batch_size,
-            "lr": args.lr,
-            "patch_len": patch_len,
-            "channels": C,
-            "timepoints": T,
-        }
-    )
+    import json, pathlib
+    cfg_path = pathlib.Path(__file__).resolve().parent.parent / "configs" / "wandb_config.json"
+    cfg = json.loads(cfg_path.read_text())
+    logger = WandbLogger(cfg)
     logger.watch_model(model, log="all")
 
     # ------------------------------------------------------------------

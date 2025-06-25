@@ -32,6 +32,9 @@ def _slice_npz(src: Path, indices: np.ndarray, dst: Path):
     """Save a sub-selection of the npz (rows along first axis) to *dst*."""
     data = np.load(src, allow_pickle=True)
 
+    # Arrays that should be sliced along the first dimension (word-related)
+    slice_keys = ["eeg_words", "events"]
+    
     sel = indices
     out_kwargs = {}
     for key in data.files:
@@ -40,14 +43,12 @@ def _slice_npz(src: Path, indices: np.ndarray, dst: Path):
             info = arr.item()
             sliced_info = {k: np.asarray(v)[sel].tolist() for k, v in info.items()}
             out_kwargs[key] = sliced_info
+        elif key in slice_keys:
+            # These arrays should be sliced along the first dimension
+            out_kwargs[key] = arr[sel]
         else:
-            # Some entries (sfreq, ch_names, etc.) are scalars or 1-D arrays
-            # independent of the word dimension.  Only slice if the first
-            # dimension matches n_words; otherwise copy as is.
-            if arr.ndim >= 1 and arr.shape[0] == len(sel):
-                out_kwargs[key] = arr[sel]
-            else:
-                out_kwargs[key] = arr
+            # Metadata like sfreq, ch_names, time_axis should be copied as-is
+            out_kwargs[key] = arr
 
     np.savez_compressed(dst, **out_kwargs)
 

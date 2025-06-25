@@ -7,6 +7,7 @@ import open_clip
 from transformers import Wav2Vec2Processor, Wav2Vec2Model
 import librosa
 from tqdm import tqdm
+import torch.nn.functional as F
 
 class BrennanAliceDataset(Dataset):
     """
@@ -22,7 +23,7 @@ class BrennanAliceDataset(Dataset):
         audio_dir: str,
         subjects: list[str],
         clip_model_name: str = 'ViT-B-32',
-        clip_pretrained: str = 'laion2b_s32b_b79k',
+        clip_pretrained: str = 'openai',
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
         npz_suffix: str = "_words.npz"
     ):
@@ -69,7 +70,8 @@ class BrennanAliceDataset(Dataset):
 
         print(f"Loading data for subjects: {self.subjects}")
         for subj in tqdm(self.subjects):
-            npz_path = self.npz_dir / f"{subj}{self.suffix}"
+            # Look for the file in the subject subdirectory
+            npz_path = self.npz_dir / subj / f"{subj}{self.suffix}"
             if not npz_path.exists():
                 print(f"Warning: File not found for subject {subj}, skipping.")
                 continue
@@ -145,17 +147,24 @@ class BrennanAliceDataset(Dataset):
     def _init_text_encoder(self, model_name, pretrained):
         """Initializes and returns the CLIP text model and tokenizer."""
         print(f"Initializing CLIP model: {model_name} ({pretrained})")
+        # Try to load the model with open_clip
         model, _, _ = open_clip.create_model_and_transforms(
             model_name, pretrained=pretrained, device=self.device
         )
         tokenizer = open_clip.get_tokenizer(model_name)
+        print("Successfully loaded CLIP model with open_clip")
+        
         return model, tokenizer
 
     def _init_audio_encoder(self):
         """Initializes and returns the Wav2Vec2 model and processor."""
         print("Initializing Wav2Vec2 model...")
+
         processor = Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
         model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-base-960h").to(self.device)
+        print("Successfully loaded Wav2Vec2 model")
+    
+        
         return processor, model
 
     def _encode_text(self):
