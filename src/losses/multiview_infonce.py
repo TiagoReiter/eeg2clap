@@ -24,7 +24,7 @@ class ClipLoss(nn.Module):
         super().__init__()
         self.cross_entropy = nn.CrossEntropyLoss()
 
-    def forward(self, x: torch.Tensor, y: torch.Tensor, logit_scale: torch.Tensor) -> torch.Tensor:  # noqa: D401
+    def forward(self, x: torch.Tensor, y: torch.Tensor, logit_scale: torch.Tensor) -> torch.Tensor:
         """Compute symmetric InfoNCE between batches *x* and *y*.
 
         Args

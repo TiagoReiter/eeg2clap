@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn import functional as F  # noqa: F401 (kept for potential future use)
+from torch.nn import functional as F
 
 from losses.multiview_infonce import ClipLoss
 

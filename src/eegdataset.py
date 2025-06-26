@@ -8,10 +8,6 @@ from models.text_encoder import get_text_encoder, encode_texts
 from models.audio_encoder import get_audio_encoder, encode_audios
 
 class BrennanAliceDataset(Dataset):
-    """
-    A PyTorch Dataset for the Brennan & Hale 'Alice in Wonderland' EEG dataset.
-    Loads preprocessed EEG epochs from .npz files, extracts the corresponding word-level text and audio, and pre-computes feature embeddings for all three modalities.
-    """
     def __init__(
         self,
         npz_dir: str,
@@ -26,17 +22,13 @@ class BrennanAliceDataset(Dataset):
         self.device = device
         self.suffix = npz_suffix
 
-        # 1. Load and concatenate data from all subjects
         self.eeg_data, self.metadata = self._load_all_subject_data()
 
-        # 2. Load all 12 audio segments
         self.audio_waveforms, self.audio_sr = self._load_audio()
 
-        # 3. Initialize encoders (frozen)
         self.text_encoder, self.text_tokenizer = get_text_encoder(device=self.device)
         self.audio_processor, self.audio_encoder, self.audio_projection = get_audio_encoder(device=self.device)
 
-        # 4. Pre-compute all features
         print("Pre-computing text features for all words...")
         self.text_features = self._encode_text()
 

@@ -16,6 +16,6 @@ def encode_texts(texts, model, tokenizer, device='cuda' if torch.cuda.is_availab
     attention_mask = inputs['attention_mask'].to(device)
     with torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        features = outputs.last_hidden_state[:, 0, :]  # CLS token
+        features = outputs.last_hidden_state[:, 0, :]
         features = F.normalize(features, dim=-1)
     return features.cpu() 
