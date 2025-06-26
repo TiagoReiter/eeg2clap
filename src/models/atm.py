@@ -55,7 +55,7 @@ class ATM(nn.Module):
         embed_dim: int = 512,
         depth: int = 6,
         num_heads: int = 8,
-        proj_dim: int = 512,
+        proj_dim: int = 768,
         dropout: float = 0.1,
         max_seq_len: int = 1024,
     ):

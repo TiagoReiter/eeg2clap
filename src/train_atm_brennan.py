@@ -90,6 +90,8 @@ def main(argv: List[str] | None = None):
     p.add_argument("--wandb_project", default="Masterthesis")
     p.add_argument("--wandb_entity", default="t-reiter-technical-university-of-munich")
     p.add_argument("--wandb_name", default="ATM_run")
+    # Debug
+    p.add_argument("--check_dims", action="store_true", help="Check embedding dimensions and exit")
     args = p.parse_args(argv)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -137,6 +139,49 @@ def main(argv: List[str] | None = None):
         val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=0)
     else:
         val_loader = None
+    
+    # ------------------------------------------------------------------
+    # Check embedding dimensions if requested
+    # ------------------------------------------------------------------
+    if args.check_dims:
+        # Get a sample batch
+        sample_batch = next(iter(train_loader))
+        
+        # Get text and audio embeddings
+        txt_emb = sample_batch["text_features"]
+        aud_emb = sample_batch["audio_features"]
+        
+        # Create ATM model
+        model = ATM(
+            patch_len=patch_len,
+            in_chans=C,
+            embed_dim=512,
+            depth=6,
+            num_heads=8,
+            proj_dim=512,  # Default projection dimension
+        ).to(device)
+        
+        # Get EEG embedding
+        eeg = sample_batch["eeg"].to(device).float()
+        eeg_emb = model(eeg)
+        
+        # Print dimensions
+        print("\n----- EMBEDDING DIMENSIONS CHECK -----")
+        print(f"EEG embedding shape: {eeg_emb.shape}")
+        print(f"Text embedding shape: {txt_emb.shape}")
+        print(f"Audio embedding shape: {aud_emb.shape}")
+        print(f"EEG embedding dim: {eeg_emb.shape[1]}")
+        print(f"Text embedding dim: {txt_emb.shape[1]}")
+        print(f"Audio embedding dim: {aud_emb.shape[1]}")
+        print("----- END DIMENSIONS CHECK -----\n")
+        
+        if eeg_emb.shape[1] != txt_emb.shape[1] or eeg_emb.shape[1] != aud_emb.shape[1]:
+            print("WARNING: Embedding dimensions don't match!")
+            print(f"To fix: Set proj_dim={txt_emb.shape[1]} in the ATM model")
+            return
+        else:
+            print("All embedding dimensions match. Good to go!")
+            return
 
     # ------------------------------------------------------------------
     # Model, optimiser, loss
@@ -147,11 +192,48 @@ def main(argv: List[str] | None = None):
         embed_dim=512,
         depth=6,
         num_heads=8,
-        proj_dim=512,
+        proj_dim=768,
     ).to(device)
 
     optimiser = optim.AdamW(model.parameters(), lr=args.lr)
     loss_fn = MultiViewInfoNCELoss()
+    
+    # Check embedding dimensions
+    with torch.no_grad():
+        # Get a small batch of data to check dimensions
+        sample_batch = next(iter(train_loader))
+        sample_eeg = sample_batch["eeg"].to(device).float()
+        sample_txt = sample_batch["text_features"].to(device).float()
+        sample_aud = sample_batch["audio_features"].to(device).float()
+        
+        # Forward pass to get EEG embeddings
+        sample_eeg_emb = model(sample_eeg)
+        
+        # Print dimensions for debugging
+        print(f"EEG embedding dimension: {sample_eeg_emb.shape}")
+        print(f"Text embedding dimension: {sample_txt.shape}")
+        print(f"Audio embedding dimension: {sample_aud.shape}")
+        
+        # Verify dimensions match
+        if sample_eeg_emb.shape[1] != sample_txt.shape[1] or sample_eeg_emb.shape[1] != sample_aud.shape[1]:
+            print("WARNING: Embedding dimensions don't match!")
+            print(f"  EEG: {sample_eeg_emb.shape[1]}")
+            print(f"  Text: {sample_txt.shape[1]}")
+            print(f"  Audio: {sample_aud.shape[1]}")
+            
+            # Adjust dimensions if needed
+            if sample_txt.shape[1] == sample_aud.shape[1]:
+                print(f"Adjusting ATM proj_dim to {sample_txt.shape[1]}")
+                # Recreate model with matching dimension
+                model = ATM(
+                    patch_len=patch_len,
+                    in_chans=C,
+                    embed_dim=512,
+                    depth=6,
+                    num_heads=8,
+                    proj_dim=sample_txt.shape[1],
+                ).to(device)
+                optimiser = optim.AdamW(model.parameters(), lr=args.lr)
 
     # ------------------------------------------------------------------
     # WandB logger
@@ -182,6 +264,9 @@ def main(argv: List[str] | None = None):
             eeg_emb = F.normalize(eeg_emb, dim=-1)
             txt = F.normalize(txt, dim=-1)
             aud = F.normalize(aud, dim=-1)
+            
+            # Debug: Print shapes to diagnose the issue
+            print(f"Shapes: EEG={eeg_emb.shape}, Text={txt.shape}, Audio={aud.shape}")
 
             loss = loss_fn([eeg_emb, txt, aud], model.logit_scale)
             loss.backward()

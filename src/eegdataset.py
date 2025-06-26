@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
-from text_encoder import get_text_encoder, encode_texts
-from audio_encoder import get_audio_encoder, encode_audios
+from models.text_encoder import get_text_encoder, encode_texts
+from models.audio_encoder import get_audio_encoder, encode_audios
 
 class BrennanAliceDataset(Dataset):
     """
@@ -34,7 +34,7 @@ class BrennanAliceDataset(Dataset):
 
         # 3. Initialize encoders (frozen)
         self.text_encoder, self.text_tokenizer = get_text_encoder(device=self.device)
-        self.audio_processor, self.audio_encoder = get_audio_encoder(device=self.device)
+        self.audio_processor, self.audio_encoder, self.audio_projection = get_audio_encoder(device=self.device)
 
         # 4. Pre-compute all features
         print("Pre-computing text features for all words...")
@@ -58,14 +58,6 @@ class BrennanAliceDataset(Dataset):
             all_eeg.append(torch.from_numpy(data['eeg_words']))
             word_info = data['word_info'].item()
             meta_df = pd.DataFrame(word_info)
-            rename_map = {
-                "words": "word",
-                "onsets": "onset",
-                "offsets": "offset",
-                "segments": "Segment",
-                "orders": "Order",
-            }
-            meta_df = meta_df.rename(columns={k: v for k, v in rename_map.items() if k in meta_df.columns})
             if "Segment" in meta_df.columns:
                 meta_df["Segment"] = meta_df["Segment"].astype(int)
             if "onset" in meta_df.columns:
@@ -118,7 +110,14 @@ class BrennanAliceDataset(Dataset):
                 end_sample = int(offset_sec * self.audio_sr)
                 word_audio = full_waveform[start_sample:end_sample]
                 audio_segments.append(word_audio)
-            features = encode_audios(audio_segments, self.audio_processor, self.audio_encoder, device=self.device, sampling_rate=self.audio_sr)
+            features = encode_audios(
+                audio_segments, 
+                self.audio_processor, 
+                self.audio_encoder, 
+                device=self.device, 
+                sampling_rate=self.audio_sr,
+                projection=self.audio_projection
+            )
             all_audio_features.append(features)
         return torch.cat(all_audio_features, dim=0)
 
